@@ -1,59 +1,90 @@
 #include <Arduino.h>
 #include <AS5600.h>
+#include <math.h>
 
+// I2C0 pins (Encoder 1)
+#define I2C0_SDA 18
+#define I2C0_SCL 19
+// I2C1 pins (Encoder 2)
+#define I2C1_SDA 21
+#define I2C1_SCL 22
+// Bus speed
+#define bus_speed 400000
+// Two I2C buses
+TwoWire I2C_Bus0 = TwoWire(0);
+TwoWire I2C_Bus1 = TwoWire(1);
+// AS5600 objects
+AS5600 encoder1(&I2C_Bus0);
+AS5600 encoder2(&I2C_Bus1);
 
-const int PWM_FREQUENCY = 5000;
-const int PWM_RESOLUTION = 10;
+static const uint32_t I2C_TIMEOUT_MS = 20;
+static const uint32_t PRINT_PERIOD_MS = 1;
 
-//Motor 1 associated variables
-#define MOTOR_1_PWM  27
-#define MOTOR_1_FORWARD 26
-#define MOTOR_1_BACKWARD 25
-const int MOTOR_1_PWM_CHANNEL = 0;
+static const float GEAR_RATIO = 64.0f;
+static const int32_t COUNTS_PER_REV = 4096;
+static const float LOAD_DEG_PER_COUNT = 360.0f / (COUNTS_PER_REV * GEAR_RATIO);
 
-int duty = 0;
-bool forward_dir = true;
+bool zeroCaptured1 = false;
+int32_t loadZeroCounts1 = 0;
+uint32_t lastPrintMs = 0;
 
-void setup(){
+void setup() {
+  // Begin serial communication
   Serial.begin(115200);
   while(!Serial);
-  ledcSetup(MOTOR_1_PWM_CHANNEL, PWM_FREQUENCY, PWM_RESOLUTION);
-  ledcAttachPin(MOTOR_1_PWM, MOTOR_1_PWM_CHANNEL);
-  ledcWrite(MOTOR_1_PWM_CHANNEL, duty);
-  pinMode(MOTOR_1_FORWARD, OUTPUT);
-  pinMode(MOTOR_1_BACKWARD, OUTPUT);
-  if(forward_dir){
-    digitalWrite(MOTOR_1_FORWARD, HIGH);
-    digitalWrite(MOTOR_1_BACKWARD, LOW);
-  }else{
-    digitalWrite(MOTOR_1_FORWARD, LOW);
-    digitalWrite(MOTOR_1_BACKWARD, HIGH);
-  }
-  Serial.println("Setup Completed");
-  delay(100);
+  Serial.println("----------------------------");
+  Serial.println("Serial communication established");
+
+  // I2C interfaces initialization
+  I2C_Bus0.begin(I2C0_SDA, I2C0_SCL, bus_speed);
+  I2C_Bus0.setTimeOut(I2C_TIMEOUT_MS);
+  delay(200);
+  Serial.println("Bus 0 initialized");
+  I2C_Bus1.begin(I2C1_SDA, I2C1_SCL, bus_speed);
+  I2C_Bus1.setTimeOut(I2C_TIMEOUT_MS);
+  delay(200);
+  Serial.println("Bus 1 initialized");
+  Serial.println("----------------------------");
+
+  // AS5600 initialization
+  encoder1.begin();
+  encoder1.resetCumulativePosition();
+  delay(200);
+  encoder2.begin();
+  encoder2.resetCumulativePosition();
+  delay(200);
+
+  if (encoder1.isConnected()) {
+        Serial.println("Encoder 1: CONNECTED");
+    } else {
+        Serial.println("Encoder 1: ERROR");
+    }
+
+    if (encoder2.isConnected()) {
+        Serial.println("Encoder 2: CONNECTED");
+    } else {
+        Serial.println("Encoder 2: ERROR");
+    }
+  Serial.println("----------------------------");
+
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    int value = Serial.parseInt();
-    Serial.print("Value: ");
-    Serial.println(value);
-    if (value > 0) {
-      if(!forward_dir){
-        digitalWrite(MOTOR_1_FORWARD, HIGH);
-        digitalWrite(MOTOR_1_BACKWARD, LOW);
-        forward_dir = true;
-      }
-      duty = value;
-      ledcWrite(MOTOR_1_PWM_CHANNEL, duty);
-    } else if (value < 0) {
-      if(forward_dir){
-        digitalWrite(MOTOR_1_FORWARD, LOW);
-        digitalWrite(MOTOR_1_BACKWARD, HIGH);
-        forward_dir = false;
-      }
-      duty = -value;
-      ledcWrite(MOTOR_1_PWM_CHANNEL, duty);
+    int32_t positionCounts1 = encoder1.getCumulativePosition();
+    float loadAngleAbs = positionCounts1 * LOAD_DEG_PER_COUNT;
+    if (!zeroCaptured1) {
+        loadZeroCounts1 = positionCounts1;
+        zeroCaptured1 = true;
     }
-  }
+    float loadAngleRel = (positionCounts1 - loadZeroCounts1) * LOAD_DEG_PER_COUNT;
+    float loadAngle360 = fmodf(loadAngleRel, 360.0f);
+    if (loadAngle360 < 0.0f) {
+        loadAngle360 += 360.0f;
+    }
+
+    float nowMs = millis();
+    if (nowMs - lastPrintMs >= PRINT_PERIOD_MS) {
+        lastPrintMs = nowMs;
+        Serial.println(loadAngle360, 2);
+    }
 }
