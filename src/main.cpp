@@ -19,7 +19,7 @@ AS5600 encoder2(&I2C_Bus1);
 
 static const uint32_t I2C_TIMEOUT_MS = 20;
 static const uint32_t SAMPLE_PERIOD_MS = 5;
-static const uint32_t SETTLE_TIME_MS = 3000;
+static const uint32_t SETTLE_TIME_MS = 4000;
 
 static const float GEAR_RATIO = 64.0f;
 static const int32_t COUNTS_PER_REV = 4096;
@@ -134,7 +134,7 @@ void loop() {
 
     uint32_t nowMs = millis();
     if (nowMs >= START_TIME_MS && started == false){
-      ledcWrite(MOTOR_1_PWM_CHANNEL, 30);
+      ledcWrite(MOTOR_1_PWM_CHANNEL, 210);
       started = true;
     }
     if (started && !finished && (nowMs - lastSampleMs >= SAMPLE_PERIOD_MS) && sampleCount < MAX_SAMPLES) {
