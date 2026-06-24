@@ -26,12 +26,12 @@ const int CPR_OUTPUT = CPR_MOTOR * GEAR_RATIO;
 float targetAngle = 0;
 
 float Kp = 2;
-float Ki = 0.01;
-float Kd = 0.000;
+float Ki = 0;//0.001;
+float Kd = 0.05;//0.05;
 
-const float Kg      = 10.0f;    // ← NUEVO: compensación gravitacional [PWM/sin(θ)]
+float Kg  = 80.0f;    // ← NUEVO: compensación gravitacional [PWM/sin(θ)]
 const float PWM_MIN = 30.0f;   // ← NUEVO: umbral mínimo para vencer fricción estática
-const float PWM_MAX = 150.0f;  // ← NUEVO: límite de movimiento brusco
+const float PWM_MAX = 170.0f;  // ← NUEVO: límite de movimiento brusco
 const float DEG2RAD = PI / 180.0f;  // ← NUEVO
 
 float integral      = 0;
@@ -139,7 +139,6 @@ void loop() {
         if (s.length() > 0) {
             targetAngle = s.toFloat();
             integral    = 0.0f;
-            Serial.printf("Setpoint: %.2f°\n", targetAngle);
         }
     }
 
@@ -150,7 +149,7 @@ void loop() {
     static unsigned long lastPrint = 0;
     if (millis() - lastPrint > 100) {
         lastPrint = millis();
-        // ← telemetría: ángulo, error, pwm (en lugar de target + angle + pwm)
+        // ← telemetría: ángulo, deseado, error, pwm
         Serial.printf("th:%.2f th_des:%.2f e:%.2f  pwm:%.1f\n",
                       angle,targetAngle, targetAngle - angle, control);
     }
