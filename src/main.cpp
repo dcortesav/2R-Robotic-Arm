@@ -1,175 +1,73 @@
 #include <Arduino.h>
 #include "soc/gpio_struct.h"
 
-// ── Encoder 1 ─────────────────────────────────────────────────────────────────
+// ── Encoder ───────────────────────────────────────────────────────────────────
 #define ENC_A 18
 #define ENC_B 19
 
-// ── Encoder 2 ── NUEVO ────────────────────────────────────────────────────────
-#define ENC_A2 34
-#define ENC_B2 35
-
-volatile long encoderCount  = 0;
-volatile long encoderCount2 = 0;                          // NUEVO
-portMUX_TYPE encMux  = portMUX_INITIALIZER_UNLOCKED;
-portMUX_TYPE encMux2 = portMUX_INITIALIZER_UNLOCKED;     // NUEVO
-
-static unsigned long lastPrint = 0;
+volatile long encoderCount = 0;
+portMUX_TYPE encMux = portMUX_INITIALIZER_UNLOCKED;
 
 const int PPR        = 11;
 const int CPR_MOTOR  = PPR * 4;
 const int GEAR_RATIO = 64;
 const int CPR_OUTPUT = CPR_MOTOR * GEAR_RATIO;
 
-// ── Motor 1 L298N ─────────────────────────────────────────────────────────────
-#define MOTOR_PWM  25
-#define MOTOR_IN1  26
-#define MOTOR_IN2  27
+// ── Motor L298N ───────────────────────────────────────────────────────────────
+#define MOTOR_PWM 25
+#define MOTOR_IN1 26
+#define MOTOR_IN2 27
 
-// ── Motor 2 L298N ── NUEVO ────────────────────────────────────────────────────
-#define MOTOR_PWM2 14                                      // NUEVO
-#define MOTOR_IN3  13                                      // NUEVO
-#define MOTOR_IN4   4                                      // NUEVO
-
-#define PWM_CHANNEL  0
-#define PWM_CHANNEL2 1                                     // NUEVO
+#define PWM_CHANNEL    0
 #define PWM_FREQ       20000
 #define PWM_RESOLUTION 8
 
-// ── PID Motor 1 ───────────────────────────────────────────────────────────────
-float targetAngle      = 0;
-float integral         = 0;
-float previousError    = 0;
-unsigned long previousPIDTime = 0;
-
-// ── PID Motor 2 ── NUEVO ──────────────────────────────────────────────────────
-float targetAngle2     = 0;                               // NUEVO
-float integral2        = 0;                               // NUEVO
-float previousError2   = 0;                               // NUEVO
-unsigned long previousPIDTime2 = 0;                       // NUEVO
+// ── PID ───────────────────────────────────────────────────────────────────────
+float targetAngle = 0;
 
 float Kp = 8;
-float Ki = 0;
-float Kd = 0.05;
+float Ki = 0.0;
+float Kd = 0.5;
 
-float Kg            = 110.0f;
+float Kg            = 70.0f;
 const float PWM_MIN = 30.0f;
-const float PWM_MAX = 170.0f;
+const float PWM_MAX = 255.0f;
 const float DEG2RAD = PI / 180.0f;
 
+float integral        = 0;
+float previousError   = 0;
+unsigned long previousPIDTime = 0;
+
 // ── Trayectoria ───────────────────────────────────────────────────────────────
-const float SETPOINTS_MOTOR1[] = {   // renombrado desde SETPOINTS
-    0, 0.6814386, 1.362848, 2.044197, 2.725458, 3.4066, 4.087594, 4.768411,
-    5.44902, 6.129392, 6.809497, 7.489306, 8.168789, 8.847917, 9.526659, 10.20499,
-    10.88287, 11.56028, 12.23719, 12.91356, 13.58937, 14.26458, 14.93918, 15.61312,
-    16.28638, 16.95893, 17.63074, 18.30178, 18.97202, 19.64143, 20.30998, 20.97764,
-    21.64439, 22.31018, 22.975, 23.63881, 24.30158, 24.96329, 25.6239, 26.28338,
-    26.94171, 27.59886, 28.25479, 28.90947, 29.56288, 30.21499, 30.86576, 31.51517,
-    32.16319, 32.80979, 33.45493, 34.0986, 34.74075, 35.38136, 36.0204, 36.65784,
-    37.29366, 37.92781, 38.56027, 39.19102, 39.82002, 40.44724, 41.07265, 41.69623,
-    42.31794, 42.93775, 43.55564, 44.17157, 44.78551, 45.39745, 46.00734, 46.61515,
-    47.22086, 47.82444, 48.42585, 49.02507, 49.62207, 50.21682, 50.80929, 51.39944,
-    51.98726, 52.5727, 53.15575, 53.73637, 54.31452, 54.89019, 55.46334, 56.03394,
-    56.60197, 57.16738, 57.73016, 58.29028, 58.84769, 59.40239, 59.95432, 60.50347,
-    61.04981, 61.5933, 62.13392, 62.67164, 63.20642, 63.73824, 64.26707, 64.79287,
-    65.31562, 65.8353, 66.35186, 66.86528, 67.37553, 67.88258, 68.3864, 68.88696,
-    69.38424, 69.87819, 70.3688, 70.85603, 71.33985, 71.82024, 72.29715, 72.77058,
-    73.24048, 73.70682, 74.16958, 74.62872, 75.08422, 75.53604, 75.98416, 76.42855,
-    76.86918, 77.30601, 77.73902, 78.16818, 78.59346, 79.01483, 79.43225, 79.84571,
-    80.25517, 80.6606, 81.06197, 81.45925, 81.85241, 82.24142, 82.62626, 83.00689,
-    83.38328, 83.75541, 84.12324, 84.48674, 84.84589, 85.20066, 85.55101, 85.89691,
-    86.23835, 86.57528, 86.90767, 87.23551, 87.55875, 87.87737, 88.19133, 88.50062,
-    88.8052, 89.10503, 89.4001, 89.69036, 89.9758, 90.25637, 90.53206, 90.80283,
-    91.06866, 91.3295, 91.58534, 91.83614, 92.08188, 92.32252, 92.55803, 92.78839,
-    93.01356, 93.23352, 93.44824, 93.65768, 93.86182, 94.06062, 94.25406, 94.44212,
-    94.62474, 94.80192, 94.97362, 95.1398, 95.30045, 95.45552, 95.605, 95.74884,
-    95.88703, 96.01953, 96.14631, 96.26734, 96.3826, 96.49205, 96.59566, 96.6934,
-    96.6934, 96.83738, 96.974, 97.10326, 97.22516, 97.48364, 97.7202, 97.93486,
-    98.12772, 98.29893, 98.44872, 98.57735, 98.68516, 98.77251, 98.83986, 98.88768,
-    98.9165, 98.92692, 98.91959, 98.89521, 98.85456, 98.7985, 98.72798, 98.64406,
-    98.54792, 98.44088, 98.32446, 98.20036, 98.07054, 97.93724, 97.80303, 97.67084,
-    97.54397, 97.42614, 97.32144, 97.23424, 97.16914, 97.1307, 97.12331, 97.1509,
-    97.21672, 97.32311, 97.4714, 97.66178, 97.89333, 98.16411, 98.4713, 98.81141,
-    99.18048, 99.57435, 99.98885, 100.4199, 100.8637, 101.3168, 101.7759, 102.2381,
-    102.7008, 103.1617, 103.6187, 104.07, 104.5137, 104.9485, 105.3729, 105.7857,
-    106.1856, 106.5716, 106.9428, 107.2982, 107.6369, 107.9582, 108.2613, 108.5455,
-    108.8101, 109.0545, 109.278, 109.4801, 109.6602, 109.8178, 109.9523, 110.0631,
-    110.1498, 110.2119, 110.2489, 110.2602, 110.2455, 110.2042, 110.1359, 110.0401,
-    109.9163, 109.7643, 109.5835, 109.3737, 109.1344, 108.8654, 108.5666, 108.2376,
-    107.8784, 107.4891, 107.0698, 106.6207, 106.1423, 105.6351, 105.0999, 104.5377,
-    103.9498, 103.3378, 102.7034, 102.0489, 101.3769, 100.6902, 99.99213, 99.28657,
-    98.57766, 97.87001, 97.16864, 96.47888, 95.80632, 95.15663, 94.53541, 93.94793,
-    93.39888, 92.89209, 92.43032, 92.01505, 91.6464, 91.32308, 91.04252, 90.80095,
-    90.59367, 90.41527, 90.25994, 90.12166, 89.99443, 89.87239, 89.74994, 89.62171,
-    89.4826, 89.3277, 89.15229, 88.95177, 88.72159, 88.45724, 88.15425, 87.80809,
-    87.41427, 86.96828, 86.46569, 85.90215, 85.27355, 84.57607, 83.80633, 82.96159,
-    82.03988, 81.04021, 79.96277, 78.80906, 77.58211, 76.2865, 74.92844, 73.51574,
-    72.05768, 70.56485, 69.04885, 67.52203, 65.99708, 64.48675, 63.0034, 61.55874,
-    60.16352, 58.82732, 57.55839, 56.36357, 55.24826, 54.21646, 53.27081, 52.41273,
-    51.64253, 50.95954, 50.36227, 49.84849, 49.41542, 49.05979, 48.77795, 48.56596,
-    48.41965, 48.33467, 48.30654, 48.33065, 48.40229, 48.51665, 48.66883, 48.85376,
-    49.06624, 49.30089, 49.55207, 49.8139, 50.08022, 50.34459, 50.60031, 50.84052,
-    51.05837, 51.24719, 51.40086, 51.51404, 51.58254, 51.6036, 51.57605, 51.50047,
-    51.37911, 51.21583, 51.01581, 50.78526, 50.53109, 50.2605, 49.98067, 49.69849,
-    49.42038, 49.15215, 48.89894, 48.66524, 48.45486, 48.27098, 48.11622, 47.99265,
-    47.90188, 47.84507, 47.823, 47.8361, 47.88449, 47.96803, 48.08632, 48.23878,
-    48.42464, 48.64296, 48.89268, 49.17264, 49.48157, 49.81812, 50.1809, 50.56847,
-    50.97934, 51.41201, 51.86495, 52.33665, 52.82557, 53.33021, 53.84908, 54.38068,
-    54.92356, 55.4763, 56.03752, 56.60584, 57.17995, 57.75858, 58.34049, 58.9245,
-    59.50945, 60.09427, 60.6779, 61.25936, 61.8377, 62.41204, 62.98154, 63.54541,
-    64.10294, 64.65345, 65.19632, 65.73099, 66.25696, 66.77377, 67.28104, 67.77844,
-    68.26571, 68.74267, 69.2092, 69.66528, 70.11099, 70.54652, 70.97219, 71.38848,
-    71.79607, 72.19582, 72.58883, 72.97644, 73.36024, 73.74204, 74.12383, 74.50773,
-    74.89591, 75.29052, 75.6936, 76.10696, 76.5322, 76.97057, 77.42299, 77.89001,
-    78.37188, 78.8685, 79.37951, 79.90431, 80.44213, 80.992, 81.55285, 82.1235,
-    82.70269, 83.28909, 83.88135, 84.47805, 85.07777, 85.67906, 86.28047, 86.88056,
-    87.47789, 88.07102, 88.65855, 89.23911, 89.81135, 90.37396, 90.92569, 91.46531,
-    91.99167, 92.50367, 93.00028, 93.48054, 93.94354, 94.38848, 94.6176, 94.84077,
-    95.05779, 95.26846
+const float SETPOINTS[] = {
+    0, 20, 40, 60, 80, 100, 120, 140, 160, 180,
+    160, 140, 120, 100, 80, 60, 40, 20, 0
 };
-const int   N_SETPOINTS = sizeof(SETPOINTS_MOTOR1) / sizeof(SETPOINTS_MOTOR1[0]);
+const int    N_SETPOINTS    = sizeof(SETPOINTS) / sizeof(SETPOINTS[0]);
+int          setpointIdx    = 0;
+uint32_t     stepIntervalMs = 500UL;  // ms entre puntos — ajustar por Serial (ej: "500")
+uint32_t     lastStepMs     = 0;
 
-// NUEVO — reemplazar con la trayectoria real del motor 2 (debe tener N_SETPOINTS elementos)
-const float SETPOINTS_MOTOR2[N_SETPOINTS] = {0, 0.5330442, 1.066066, 1.599043, 2.131954, 2.664775, 3.197484, 3.73006, 4.262479, 4.79472, 5.32676, 5.858577, 6.390148, 6.921452, 7.452465, 7.983166, 8.513533, 9.043542, 9.573172, 10.1024, 10.6312, 11.15956, 11.68745, 12.21485, 12.74174, 13.26808, 13.79388, 14.31909, 14.8437, 15.36768, 15.89102, 16.41369, 16.93566, 17.45692, 17.97745, 18.49722, 19.0162, 19.53438, 20.05174, 20.56825, 21.08389, 21.59863, 22.11246, 22.62536, 23.13729, 23.64824, 24.15819, 24.66711, 25.17499, 25.68179, 26.1875, 26.69209, 27.19554, 27.69784, 28.19895, 28.69885, 29.19753, 29.69496, 30.19112, 30.68598, 31.17953, 31.67173, 32.16258, 32.65204, 33.1401, 33.62673, 34.11191, 34.59561, 35.07782, 35.55852, 36.03767, 36.51526, 36.99127, 37.46567, 37.93844, 38.40956, 38.879, 39.34675, 39.81278, 40.27708, 40.7396, 41.20035, 41.65928, 42.11639, 42.57164, 43.02502, 43.4765, 43.92607, 44.37369, 44.81934, 45.26302, 45.70468, 46.14431, 46.58189, 47.0174, 47.4508, 47.88209, 48.31124, 48.73822, 49.16301, 49.58559, 50.00595, 50.42404, 50.83987, 51.25339, 51.66459, 52.07345, 52.47995, 52.88406, 53.28575, 53.68502, 54.08183, 54.47616, 54.868, 55.25731, 55.64408, 56.02828, 56.40989, 56.78889, 57.16526, 57.53898, 57.91001, 58.27835, 58.64396, 59.00683, 59.36693, 59.72424, 60.07874, 60.43041, 60.77922, 61.12515, 61.46818, 61.80829, 62.14545, 62.47965, 62.81085, 63.13904, 63.4642, 63.78629, 64.10531, 64.42123, 64.73402, 65.04367, 65.35015, 65.65344, 65.95351, 66.25035, 66.54393, 66.83423, 67.12123, 67.4049, 67.68522, 67.96218, 68.23574, 68.50589, 68.7726, 69.03586, 69.29563, 69.5519, 69.80464, 70.05384, 70.29946, 70.54149, 70.77991, 71.01469, 71.24581, 71.47325, 71.69698, 71.91699, 72.13324, 72.34573, 72.55442, 72.7593, 72.96034, 73.15752, 73.35081, 73.54021, 73.72567, 73.90718, 74.08472, 74.25827, 74.4278, 74.59329, 74.75472, 74.91207, 75.06531, 75.21442, 75.35938, 75.50017, 75.63676, 75.76913, 75.89727, 76.02114, 76.14073, 76.25601, 76.36696, 76.47357, 76.57579, 76.67362, 76.76704, 76.76704, 76.89648, 77.04108, 77.20055, 77.37459, 77.69148, 78.05234, 78.45596, 78.90099, 79.38596, 79.90925, 80.46917, 81.06387, 81.69145, 82.34988, 83.03708, 83.75085, 84.48893, 85.24901, 86.02867, 86.82544, 87.63675, 88.45996, 89.29235, 90.13106, 90.97316, 91.81556, 92.65501, 93.48813, 94.3113, 95.12075, 95.91247, 96.68224, 97.42573, 98.13847, 98.81606, 99.45427, 100.0493, 100.598, 101.0981, 101.5483, 101.9487, 102.3006, 102.6065, 102.8702, 103.0962, 103.2899, 103.4571, 103.6038, 103.7357, 103.8585, 103.9772, 104.0964, 104.2202, 104.3522, 104.4953, 104.6522, 104.8251, 105.0159, 105.2262, 105.4571, 105.7098, 105.9851, 106.2837, 106.6059, 106.9522, 107.3226, 107.7174, 108.1363, 108.5793, 109.046, 109.536, 110.0489, 110.5841, 111.1409, 111.7187, 112.3167, 112.9338, 113.5693, 114.2221, 114.8911, 115.5751, 116.273, 116.9835, 117.7052, 118.4368, 119.1768, 119.9238, 120.6761, 121.4323, 122.1907, 122.9496, 123.7073, 124.462, 125.212, 125.9556, 126.6908, 127.4159, 128.1291, 128.8287, 129.5127, 130.1796, 130.8278, 131.4556, 132.0617, 132.6449, 133.204, 133.7382, 134.2471, 134.7302, 135.1877, 135.6203, 136.0291, 136.4155, 136.782, 137.1315, 137.4676, 137.7945, 138.1171, 138.4407, 138.7709, 139.1132, 139.4727, 139.8544, 140.262, 140.6987, 141.1664, 141.6659, 142.197, 142.7586, 143.3488, 143.9651, 144.6046, 145.2642, 145.9407, 146.6308, 147.3313, 148.039, 148.7508, 149.4636, 150.1743, 150.8799, 151.5773, 152.2634, 152.935, 153.5888, 154.2216, 154.83, 155.4104, 155.9595, 156.4737, 156.9495, 157.3834, 157.7723, 158.1128, 158.4022, 158.6379, 158.8178, 158.9403, 159.0041, 159.0087, 158.9541, 158.8408, 158.6699, 158.443, 158.1621, 157.8298, 157.4487, 157.0218, 156.5524, 156.0436, 155.4988, 154.9211, 154.3139, 153.6802, 153.023, 152.3452, 151.6495, 150.9385, 150.2146, 149.4801, 148.7372, 147.988, 147.2344, 146.4781, 145.7211, 144.965, 144.2113, 143.4617, 142.7177, 141.9806, 141.2521, 140.5335, 139.8262, 139.1317, 138.4512, 137.7861, 137.1376, 136.5068, 135.8946, 135.3016, 134.7281, 134.1738, 133.6379, 133.119, 132.615, 132.1232, 131.6406, 131.1633, 130.6878, 130.21, 129.7261, 129.2326, 128.7263, 128.2047, 127.6655, 127.1071, 126.5286, 125.9292, 125.3088, 124.6676, 124.0062, 123.3253, 122.626, 121.9094, 121.1768, 120.4298, 119.6699, 118.8988, 118.1181, 117.3296, 116.5351, 115.7362, 114.9349, 114.1328, 113.3319, 112.5337, 111.7402, 110.9529, 110.1736, 109.4039, 108.6454, 107.8998, 107.1685, 106.4531, 105.7549, 105.0754, 104.4158, 103.7775, 103.1616, 102.5693, 102.0016, 101.4595, 100.9439, 100.4556, 99.9954, 99.5639, 99.16164, 98.78906, 98.44649, 98.13415, 97.85213, 97.60042, 97.37884, 97.1871, 97.02476, 96.89118, 96.7856, 96.70704, 96.65431, 96.62602, 96.62051, 96.63584, 96.66975, 96.71964, 96.78249, 96.85484, 96.93274, 97.01166, 97.08655, 97.15177, 97.20115, 97.22813, 97.22591, 97.18771, 97.10708, 96.97824, 96.79639, 96.558, 96.26096, 95.90475, 95.49036, 95.02023, 94.498, 93.92828, 93.3163, 92.66768, 91.98812, 91.28325, 90.55847, 89.81889, 89.0693, 88.31417, 87.55764, 86.80359, 86.05566, 85.31723, 84.59152, 83.88157, 83.19024, 82.52029, 81.87431, 81.2548, 80.66411, 80.10449, 79.57806, 79.08685, 78.63272, 78.21743, 77.8426, 77.5097, 77.22005, 76.97483, 76.77504, 76.62153, 76.51497, 76.44551, 76.39173, 76.35379, 76.33183};
-
-int      setpointIdx    = 0;
-uint32_t stepIntervalMs = 50UL;
-uint32_t lastStepMs     = 0;
-
-// ── ISR Encoder 1 ─────────────────────────────────────────────────────────────
+// ── ISR ───────────────────────────────────────────────────────────────────────
 void IRAM_ATTR encoderISR() {
     static uint8_t prevState = 0;
+
     uint8_t A = (GPIO.in >> ENC_A) & 1;
     uint8_t B = (GPIO.in >> ENC_B) & 1;
+
     uint8_t currentState = (A << 1) | B;
     uint8_t transition   = (prevState << 2) | currentState;
     prevState = currentState;
+
     portENTER_CRITICAL_ISR(&encMux);
     switch (transition) {
-        case 0b0001: case 0b0111: case 0b1110: case 0b1000: encoderCount++;  break;
-        case 0b0010: case 0b0100: case 0b1101: case 0b1011: encoderCount--;  break;
+        case 0b0001: case 0b0111: case 0b1110: case 0b1000: encoderCount++; break;
+        case 0b0010: case 0b0100: case 0b1101: case 0b1011: encoderCount--; break;
     }
     portEXIT_CRITICAL_ISR(&encMux);
 }
 
-// ── ISR Encoder 2 ── NUEVO ────────────────────────────────────────────────────
-// GPIO 34/35 están en el banco extendido: registro GPIO.in1.val (bits pin-32)
-void IRAM_ATTR encoderISR2() {
-    static uint8_t prevState = 0;
-    uint8_t A = (GPIO.in1.val >> (ENC_A2 - 32)) & 1;     // NUEVO
-    uint8_t B = (GPIO.in1.val >> (ENC_B2 - 32)) & 1;     // NUEVO
-    uint8_t currentState = (A << 1) | B;
-    uint8_t transition   = (prevState << 2) | currentState;
-    prevState = currentState;
-    portENTER_CRITICAL_ISR(&encMux2);
-    switch (transition) {
-        case 0b0001: case 0b0111: case 0b1110: case 0b1000: encoderCount2++; break;
-        case 0b0010: case 0b0100: case 0b1101: case 0b1011: encoderCount2--; break;
-    }
-    portEXIT_CRITICAL_ISR(&encMux2);
-}
-
-// ── Posición angular Motor 1 ──────────────────────────────────────────────────
+// ── Posición angular ──────────────────────────────────────────────────────────
 float getOutputAngle() {
     portENTER_CRITICAL(&encMux);
     long count = encoderCount;
@@ -177,75 +75,49 @@ float getOutputAngle() {
     return (count * 360.0f) / CPR_OUTPUT;
 }
 
-// ── Posición angular Motor 2 ── NUEVO ─────────────────────────────────────────
-float getOutputAngle2() {
-    portENTER_CRITICAL(&encMux2);
-    long count = encoderCount2;
-    portEXIT_CRITICAL(&encMux2);
-    return (count * 360.0f) / CPR_OUTPUT;
-}
-
-// ── Motor 1 ───────────────────────────────────────────────────────────────────
+// ── Motor ─────────────────────────────────────────────────────────────────────
 void setMotor(float pwm) {
     pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
-    if (fabsf(pwm) > 0.5f && fabsf(pwm) < PWM_MIN) pwm = copysignf(PWM_MIN, pwm);
+    if (fabsf(pwm) > 0.5f && fabsf(pwm) < PWM_MIN)
+        pwm = copysignf(PWM_MIN, pwm);
+
     if (pwm > 0.5f) {
-        digitalWrite(MOTOR_IN1, HIGH); digitalWrite(MOTOR_IN2, LOW);
+        digitalWrite(MOTOR_IN1, HIGH);
+        digitalWrite(MOTOR_IN2, LOW);
         ledcWrite(PWM_CHANNEL, (uint32_t) pwm);
     } else if (pwm < -0.5f) {
-        digitalWrite(MOTOR_IN1, LOW);  digitalWrite(MOTOR_IN2, HIGH);
+        digitalWrite(MOTOR_IN1, LOW);
+        digitalWrite(MOTOR_IN2, HIGH);
         ledcWrite(PWM_CHANNEL, (uint32_t)(-pwm));
     } else {
-        digitalWrite(MOTOR_IN1, LOW);  digitalWrite(MOTOR_IN2, LOW);
+        digitalWrite(MOTOR_IN1, LOW);
+        digitalWrite(MOTOR_IN2, LOW);
         ledcWrite(PWM_CHANNEL, 0);
     }
 }
 
-// ── Motor 2 ── NUEVO ──────────────────────────────────────────────────────────
-void setMotor2(float pwm) {
-    pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
-    if (fabsf(pwm) > 0.5f && fabsf(pwm) < PWM_MIN) pwm = copysignf(PWM_MIN, pwm);
-    if (pwm > 0.5f) {
-        digitalWrite(MOTOR_IN3, HIGH); digitalWrite(MOTOR_IN4, LOW);
-        ledcWrite(PWM_CHANNEL2, (uint32_t) pwm);
-    } else if (pwm < -0.5f) {
-        digitalWrite(MOTOR_IN3, LOW);  digitalWrite(MOTOR_IN4, HIGH);
-        ledcWrite(PWM_CHANNEL2, (uint32_t)(-pwm));
-    } else {
-        digitalWrite(MOTOR_IN3, LOW);  digitalWrite(MOTOR_IN4, LOW);
-        ledcWrite(PWM_CHANNEL2, 0);
-    }
-}
-
-// ── PID Motor 1 ───────────────────────────────────────────────────────────────
+// ── PID ───────────────────────────────────────────────────────────────────────
 float computePID(float setpoint, float position) {
     unsigned long now = millis();
     float dt = (now - previousPIDTime) / 1000.0f;
     if (dt <= 0) dt = 0.001f;
     previousPIDTime = now;
+
     float error = setpoint - position;
-    if (fabsf(error) < 0.5f) { integral = 0; previousError = error; return 0.0f; }
+
+    if (fabsf(error) < 0.5f) {
+        integral      = 0;
+        previousError = error;
+        return 0.0f;
+    }
+
     integral += error * dt;
     float derivative = (error - previousError) / dt;
     previousError = error;
+
     float output = Kp * error + Ki * integral + Kd * derivative
                  + Kg * sinf(position * DEG2RAD);
-    return constrain(output, -PWM_MAX, PWM_MAX);
-}
 
-// ── PID Motor 2 ── NUEVO ──────────────────────────────────────────────────────
-float computePID2(float setpoint, float position) {
-    unsigned long now = millis();
-    float dt = (now - previousPIDTime2) / 1000.0f;
-    if (dt <= 0) dt = 0.001f;
-    previousPIDTime2 = now;
-    float error = setpoint - position;
-    if (fabsf(error) < 0.5f) { integral2 = 0; previousError2 = error; return 0.0f; }
-    integral2 += error * dt;
-    float derivative = (error - previousError2) / dt;
-    previousError2 = error;
-    float output = Kp * error + Ki * integral2 + Kd * derivative
-                 + Kg * sinf(position * DEG2RAD);
     return constrain(output, -PWM_MAX, PWM_MAX);
 }
 
@@ -254,60 +126,52 @@ void setup() {
     Serial.begin(115200);
     Serial.setTimeout(50);
 
-    // Encoder 1
     pinMode(ENC_A, INPUT_PULLUP);
     pinMode(ENC_B, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(ENC_A),  encoderISR,  CHANGE);
-    attachInterrupt(digitalPinToInterrupt(ENC_B),  encoderISR,  CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ENC_B), encoderISR, CHANGE);
 
-    // Encoder 2 — GPIO 34/35 no soportan INPUT_PULLUP; el encoder tiene pullup integrado
-    pinMode(ENC_A2, INPUT);                                               // NUEVO
-    pinMode(ENC_B2, INPUT);                                               // NUEVO
-    attachInterrupt(digitalPinToInterrupt(ENC_A2), encoderISR2, CHANGE); // NUEVO
-    attachInterrupt(digitalPinToInterrupt(ENC_B2), encoderISR2, CHANGE); // NUEVO
+    pinMode(MOTOR_IN1, OUTPUT);
+    pinMode(MOTOR_IN2, OUTPUT);
+    ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttachPin(MOTOR_PWM, PWM_CHANNEL);
 
-    // Motor 1
-    pinMode(MOTOR_IN1, OUTPUT); pinMode(MOTOR_IN2, OUTPUT);
-    ledcSetup(PWM_CHANNEL,  PWM_FREQ, PWM_RESOLUTION);
-    ledcAttachPin(MOTOR_PWM,  PWM_CHANNEL);
-
-    // Motor 2
-    pinMode(MOTOR_IN3, OUTPUT); pinMode(MOTOR_IN4, OUTPUT);              // NUEVO
-    ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);                   // NUEVO
-    ledcAttachPin(MOTOR_PWM2, PWM_CHANNEL2);                             // NUEVO
-
-    previousPIDTime  = millis();
-    previousPIDTime2 = millis();                                          // NUEVO
-    targetAngle      = SETPOINTS_MOTOR1[0];
-    targetAngle2     = SETPOINTS_MOTOR2[0];                               // NUEVO
-    lastStepMs       = millis();
+    previousPIDTime = millis();
+    targetAngle     = SETPOINTS[0];
+    lastStepMs      = millis();
+    Serial.printf("Intervalo actual: %lu ms — cambiar enviando un número (ej: \"500\")\n",
+                  stepIntervalMs);
 }
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
 void loop() {
-    uint32_t nowMs = millis();
-
-    if (nowMs - lastStepMs >= stepIntervalMs) {
-        setpointIdx  = (setpointIdx + 1) % N_SETPOINTS;
-        targetAngle  = SETPOINTS_MOTOR1[setpointIdx];
-        targetAngle2 = SETPOINTS_MOTOR2[setpointIdx];                     // NUEVO
-        integral     = 0.0f;
-        integral2    = 0.0f;                                              // NUEVO
-        lastStepMs   = nowMs;
+    // Intervalo ajustable por Serial
+    if (Serial.available()) {
+        String s = Serial.readStringUntil('\n');
+        s.trim();
+        if (s.length() > 0) {
+            stepIntervalMs = (uint32_t)s.toInt();
+            Serial.printf("Intervalo: %lu ms\n", stepIntervalMs);
+        }
     }
 
-    float angle    = getOutputAngle();
-    float control  = computePID(targetAngle, angle);
+    // Avance cíclico de la trayectoria
+    uint32_t nowMs = millis();
+    if (nowMs - lastStepMs >= stepIntervalMs) {
+        setpointIdx = (setpointIdx + 1) % N_SETPOINTS;
+        targetAngle = SETPOINTS[setpointIdx];
+        integral    = 0.0f;
+        lastStepMs  = nowMs;
+    }
+
+    float angle   = getOutputAngle();
+    float control = computePID(targetAngle, angle);
     setMotor(control);
 
-    float angle2   = getOutputAngle2();                                   // NUEVO
-    float control2 = computePID2(targetAngle2, angle2);                  // NUEVO
-    setMotor2(control2);                                                  // NUEVO
-
+    static unsigned long lastPrint = 0;
     if (millis() - lastPrint > 100) {
         lastPrint = millis();
-        Serial.printf("M1 th:%.2f des:%.2f e:%.2f pwm:%.1f | M2 th:%.2f des:%.2f e:%.2f pwm:%.1f\n",
-                      angle,  targetAngle,  targetAngle  - angle,  control,
-                      angle2, targetAngle2, targetAngle2 - angle2, control2);
+        Serial.printf("th:%.2f th_des:%.2f e:%.2f pwm:%.1f\n",
+                      angle, targetAngle, targetAngle - angle, control);
     }
 }
