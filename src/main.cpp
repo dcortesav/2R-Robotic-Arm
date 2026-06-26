@@ -51,7 +51,7 @@ float Kp = 5.0f,  Ki = 0.0f,  Kd = 0.8f,  Kg = 70.0f;
 float Kp2 = 10.0f, Ki2 = 0.0f, Kd2 = 0.8f, Kg2 = 7.0f;
 
 const float PWM_MIN   = 30.0f,  PWM_MAX   = 255.0f;
-const float PWM_MIN_2 = 0.0f,   PWM_MAX_2 = 150.0f;
+const float PWM_MIN_2 = 0.0f,   PWM_MAX_2 = 255.0f;
 const float DEG2RAD   = PI / 180.0f;
 
 // ── Máquina de estados ────────────────────────────────────────────────────────

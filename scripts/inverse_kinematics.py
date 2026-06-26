@@ -18,11 +18,11 @@ NUM_CLOVER_REPETITIONS = 3        # repeticiones del trébol (aproximación no s
 # 1) PARÁMETROS CONFIGURABLES (preservados)
 # ========================================================
 lado_base = 20e-2
-factor_escalamiento = 1.2
+factor_escalamiento = 1.0
 lado    = lado_base * factor_escalamiento
 phi_deg = 0.0
 
-N_clover   = 400
+N_clover   = 500
 N_approach = 50
 
 x_start = 5e-2
