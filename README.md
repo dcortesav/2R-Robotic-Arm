@@ -1,5 +1,9 @@
 # 2-DOF Planar Robotic Manipulator
 
+<p align="center">
+  <img src="media/test.gif" width="700">
+</p>
+
 This repository contains the software developed for a **2-degree-of-freedom planar robotic manipulator** capable of following arbitrary trajectories using inverse kinematics and PID position control plus gravitational compensation. The project integrates embedded programming, robot kinematics, motor characterization, and real-time trajectory visualization.
 
 ## Project Overview
