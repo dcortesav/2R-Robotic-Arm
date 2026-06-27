@@ -1,14 +1,25 @@
+/**
+ * @file main.cpp
+ * @brief Firmware for a 2-DOF planar robotic manipulator.
+ *
+ * @author David Santiago Cortés Ávila
+ * @date 06/2026
+ * @version 1.0
+ *
+ * Developed as part of a Mechatronics engineering project.
+ */
+
 #include <Arduino.h>
 #include "soc/gpio_struct.h"
-#include <vector>               // trayectoria dinámica
+#include <vector>               // dynamic trajectory
 
 // ── Encoder 1 ─────────────────────────────────────────────────────────────────
 #define ENC_A 19
 #define ENC_B 18
 
 // ── Encoder 2 ─────────────────────────────────────────────────────────────────
-#define ENC_A2 35
-#define ENC_B2 34
+#define ENC_A2 34
+#define ENC_B2 35
 
 volatile long encoderCount  = 0;
 volatile long encoderCount2 = 0;
@@ -54,11 +65,11 @@ const float PWM_MIN   = 30.0f,  PWM_MAX   = 255.0f;
 const float PWM_MIN_2 = 0.0f,   PWM_MAX_2 = 255.0f;
 const float DEG2RAD   = PI / 180.0f;
 
-// ── Máquina de estados ────────────────────────────────────────────────────────
+// ── State machine ────────────────────────────────────────────────────────
 enum RobotState { WAIT_FOR_TRAJECTORY, RUN_APPROACH, RUN_CLOVER, FINISHED };
 RobotState robotState = WAIT_FOR_TRAJECTORY;
 
-// ── Trayectoria dinámica ──────────────────────────────────────────────────────
+// ── Dynamic Trajectory ──────────────────────────────────────────────────────
 std::vector<float> approachM1, approachM2, cloverM1, cloverM2;
 
 int      nApproach      = 0;
@@ -69,13 +80,13 @@ int      cloverRep      = 0;
 uint32_t stepIntervalMs = 20UL;
 uint32_t lastStepMs     = 0;
 
-// ── Telemetría ────────────────────────────────────────────────────────────────
-// Prefijo "T:" identifica telemetría. Python filtra por este prefijo.
-// Frecuencia: 25 Hz (40 ms). No mezclar con mensajes de protocolo.
+// ── Telemetry ────────────────────────────────────────────────────────────────
+// The “T:” prefix identifies telemetry. Python filters by this prefix.
+// Frequency: 25 Hz (40 ms). Do not mix with protocol messages.
 const uint32_t TELEMETRY_MS = 40UL;
 uint32_t       lastTelemMs  = 0;
 
-// ── Buffer Serial ─────────────────────────────────────────────────────────────
+// ── Serial Buffer ─────────────────────────────────────────────────────────────
 String lineBuffer = "";
 
 // ── ISR Encoder 1 ─────────────────────────────────────────────────────────────
@@ -94,7 +105,7 @@ void IRAM_ATTR encoderISR() {
     portEXIT_CRITICAL_ISR(&encMux);
 }
 
-// ── ISR Encoder 2 (banco extendido GPIO.in1.val) ──────────────────────────────
+// ── ISR Encoder 2 (extended bank GPIO.in1.val) ──────────────────────────────
 void IRAM_ATTR encoderISR2() {
     static uint8_t prevState = 0;
     uint8_t A = (GPIO.in1.val >> (ENC_A2 - 32)) & 1;
@@ -110,7 +121,7 @@ void IRAM_ATTR encoderISR2() {
     portEXIT_CRITICAL_ISR(&encMux2);
 }
 
-// ── Posición angular Motor 1 ──────────────────────────────────────────────────
+// ── Motor 1 Angular Position ──────────────────────────────────────────────────
 float getOutputAngle() {
     portENTER_CRITICAL(&encMux);
     long c = encoderCount;
@@ -118,7 +129,7 @@ float getOutputAngle() {
     return (c * 360.0f) / CPR_OUTPUT;
 }
 
-// ── Posición angular Motor 2 ──────────────────────────────────────────────────
+// ── Motor 2 Angular Position ──────────────────────────────────────────────────
 float getOutputAngle2() {
     portENTER_CRITICAL(&encMux2);
     long c = encoderCount2;
@@ -190,9 +201,9 @@ float computePID2(float setpoint, float position, float position_1) {
     return constrain(output, -PWM_MAX_2, PWM_MAX_2);
 }
 
-// ── Parser CSV ────────────────────────────────────────────────────────────────
-// Usa strtof (puntero directo) para evitar crear substrings temporales.
-// Necesario para líneas de ~3 KB (400 floats) sin fragmentar heap.
+// ── CSV Parser ────────────────────────────────────────────────────────────────
+// Use strtof (direct pointer) to avoid creating temporary substrings.
+// Necessary for lines of ~3 KB (400 floats) without fragmenting the heap.
 void parseCSV(const String& s, std::vector<float>& out) {
     const char* p = s.c_str();
     char* end;
@@ -205,8 +216,8 @@ void parseCSV(const String& s, std::vector<float>& out) {
     }
 }
 
-// ── Procesador de líneas del protocolo Serial ─────────────────────────────────
-// Protocolo:
+// ── Serial Protocol Line Processor ─────────────────────────────────
+// Protocol:
 //   Python → ESP32 : TRAJ_START <n_app> <n_clv> <n_reps> <step_ms>
 //                    M1A:<csv> | M2A:<csv> | M1C:<csv> | M2C:<csv>
 //                    TRAJ_END
@@ -258,7 +269,7 @@ void processLine(const String& line) {
                 nApproach, nClover);
         }
     } else if (line == "PING") {
-    // Responde siempre con el estado actual — útil si Python conecta en caliente
+    // Always responds with the current state
     if (robotState == WAIT_FOR_TRAJECTORY) {
         Serial.println("AWAITING_TRAJECTORY");
     } else {
@@ -267,9 +278,9 @@ void processLine(const String& line) {
 }
 }
 
-// ── Lector Serial no bloqueante ───────────────────────────────────────────────
-// Acumula caracteres en lineBuffer. Cuando llega '\n', procesa la línea completa.
-// Corre en cada iteración del loop sin afectar el tiempo del PID.
+// ── Non-blocking Serial Reader ───────────────────────────────────────────────
+// Accumulates characters in lineBuffer. When ‘\n’ is encountered, it processes the entire line.
+// Runs on every iteration of the loop without affecting the PID's execution time.
 void readSerialLine() {
     while (Serial.available()) {
         char c = (char)Serial.read();
@@ -283,9 +294,9 @@ void readSerialLine() {
     }
 }
 
-// ── Telemetría ────────────────────────────────────────────────────────────────
-// Formato: T:<ms>,<theta1>,<theta2>,<setpoint1>,<setpoint2>
-// El prefijo "T:" permite que Python filtre sin ambigüedad con mensajes de protocolo.
+// ── Telemetry ────────────────────────────────────────────────────────────────
+// Format: T:<ms>,<theta1>,<theta2>,<setpoint1>,<setpoint2>
+// The “T:” prefix allows Python to unambiguously filter protocol messages.
 void sendTelemetry(uint32_t nowMs) {
     if (nowMs - lastTelemMs < TELEMETRY_MS) return;
     lastTelemMs = nowMs;
@@ -295,7 +306,7 @@ void sendTelemetry(uint32_t nowMs) {
                   targetAngle, targetAngle2);
 }
 
-// ── Estado: RUN_APPROACH ──────────────────────────────────────────────────────
+// ── State: RUN_APPROACH ──────────────────────────────────────────────────────
 void runApproach(uint32_t nowMs) {
     float a1 = getOutputAngle();
     float a2 = getOutputAngle2();
@@ -306,7 +317,7 @@ void runApproach(uint32_t nowMs) {
         lastStepMs = nowMs;
         trajIdx++;
         if (trajIdx >= nApproach) {
-            // Transición a trébol — reset integradores
+            // Transition to clover — reset integrators
             trajIdx   = 0;
             integral  = 0; integral2 = 0;
             targetAngle  = cloverM1[0];
@@ -319,7 +330,7 @@ void runApproach(uint32_t nowMs) {
     }
 }
 
-// ── Estado: RUN_CLOVER ────────────────────────────────────────────────────────
+// ── State: RUN_CLOVER ────────────────────────────────────────────────────────
 void runClover(uint32_t nowMs) {
     float a1 = getOutputAngle();
     float a2 = getOutputAngle2();
@@ -334,13 +345,13 @@ void runClover(uint32_t nowMs) {
             cloverRep++;
             integral = 0; integral2 = 0;
             if (cloverRep >= nReps) {
-                // Trayectoria completa
+                // Trajectory complete
                 setMotor(0);
                 setMotor2(0);
                 robotState = FINISHED;
                 Serial.println("DONE");
             } else {
-                // Siguiente repetición del trébol
+                // Next clover repetition
                 targetAngle  = cloverM1[0];
                 targetAngle2 = cloverM2[0];
             }
@@ -353,8 +364,8 @@ void runClover(uint32_t nowMs) {
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup() {
-    // setRxBufferSize DEBE llamarse antes de begin().
-    // 8 KB cubre líneas de hasta ~6400 floats — más que suficiente.
+    // setRxBufferSize must be called before begin().
+    // 8 KB covers lines of up to ~6,400 floats — more than enough.
     Serial.setRxBufferSize(8192);
     Serial.begin(115200);
     Serial.setTimeout(50);
@@ -365,7 +376,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(ENC_A),  encoderISR,  CHANGE);
     attachInterrupt(digitalPinToInterrupt(ENC_B),  encoderISR,  CHANGE);
 
-    // Encoder 2 — GPIO 34/35 input-only, sin pullup interno
+    // Encoder 2 — GPIO 34/35 input-only, no internal pull-up resistors
     pinMode(ENC_A2, INPUT);
     pinMode(ENC_B2, INPUT);
     attachInterrupt(digitalPinToInterrupt(ENC_A2), encoderISR2, CHANGE);
@@ -384,7 +395,7 @@ void setup() {
     previousPIDTime  = millis();
     previousPIDTime2 = millis();
 
-    // Señal de que la ESP32 está lista para recibir trayectoria
+    // ESP32 signal indicating that it is ready to receive the trajectory
     Serial.println("AWAITING_TRAJECTORY");
 }
 
@@ -392,12 +403,12 @@ void setup() {
 void loop() {
     uint32_t nowMs = millis();
 
-    // Recepción Serial no bloqueante — siempre activa independiente del estado
+    // Non-blocking serial reception — always active regardless of status
     readSerialLine();
 
     switch (robotState) {
         case WAIT_FOR_TRAJECTORY:
-            // Motores apagados. Solo readSerialLine() corre.
+            // Motors stopped. Only readSerialLine() is running.
             break;
 
         case RUN_APPROACH:
@@ -411,7 +422,7 @@ void loop() {
             break;
 
         case FINISHED:
-            // Motores detenidos en runClover(). Nada que hacer.
+            //  Motors stopped during runClover()
             break;
     }
 }

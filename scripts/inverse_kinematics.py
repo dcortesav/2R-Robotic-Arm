@@ -1,3 +1,23 @@
+"""
+@file inverse_kinematics.py
+
+Trajectory generation and inverse kinematics for a 2-DOF planar robotic manipulator.
+
+Author: David Santiago Cortés Ávila
+Date: 06/2026
+Version: 1.0
+
+The ideas behind the trajectory generation and inverse kinematics used in this file were a product of a team effort.
+The participants of the group were:
+    Sergio Felipe Rodriguez Mayorga
+    Juan Diego Saenz Ardila
+    Miguel Angel Ortiz Mejia
+    Niccolás Dhavid Parra Canastero
+    David Santiago Cortés Ávila
+
+Developed as part of a Mechatronics engineering project.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -7,19 +27,19 @@ import queue
 import time
 
 # ========================================================
-# CONFIGURACIÓN — ajustar antes de ejecutar
+# SETUP — adjust before execution
 # ========================================================
 SERIAL_PORT            = 'COM3'   # Linux: '/dev/ttyUSB0'  Mac: '/dev/cu.usbserial-...'
 BAUD_RATE              = 115200
-STEP_INTERVAL_MS       = 20       # ms por punto de trayectoria
-NUM_CLOVER_REPETITIONS = 3        # repeticiones del trébol (aproximación no se repite)
+STEP_INTERVAL_MS       = 20       # ms per trajectory point
+NUM_CLOVER_REPETITIONS = 3        # clover repetitions (approach is not repeated)
 
 # ========================================================
-# 1) PARÁMETROS CONFIGURABLES (preservados)
+# 1) CONFIGURABLE PARAMETERS
 # ========================================================
-lado_base = 20e-2
-factor_escalamiento = 1.0
-lado    = lado_base * factor_escalamiento
+base_side = 20e-2
+scaling_factor = 1.2
+side    = base_side * scaling_factor
 phi_deg = 0.0
 
 N_clover   = 500
@@ -28,7 +48,7 @@ N_approach = 50
 x_start = 5e-2
 y_start = 0
 epsilon   = 0.2
-n_curvas  = 7
+n_curves  = 7
 v_cart    = 10e-2
 
 phi = np.radians(phi_deg)
@@ -37,18 +57,18 @@ L1 = 0.24
 L2 = 0.19
 
 # ========================================================
-# 2) GENERACIÓN GEOMÉTRICA (preservada)
+# 2) GEOMETRIC GENERATION (preserved)
 # ========================================================
 N_cont = 1000
 theta_cont = np.linspace(0, 2 * np.pi, N_cont)
-abs_suave_cont = np.sqrt(np.cos((n_curvas / 2) * theta_cont) ** 2 + epsilon ** 2)
-x_raw_cont = (0.99 + abs_suave_cont) * np.cos(theta_cont)
-y_raw_cont = (0.99 + abs_suave_cont) * np.sin(theta_cont)
+smooth_abs_cont = np.sqrt(np.cos((n_curves / 2) * theta_cont) ** 2 + epsilon ** 2)
+x_raw_cont = (0.99 + smooth_abs_cont) * np.cos(theta_cont)
+y_raw_cont = (0.99 + smooth_abs_cont) * np.sin(theta_cont)
 
 theta_disc = np.linspace(0, 2 * np.pi, N_clover)
-abs_suave_disc = np.sqrt(np.cos((n_curvas / 2) * theta_disc) ** 2 + epsilon ** 2)
-x_raw_disc = (0.99 + abs_suave_disc) * np.cos(theta_disc)
-y_raw_disc = (0.99 + abs_suave_disc) * np.sin(theta_disc)
+smooth_abs_disc = np.sqrt(np.cos((n_curves / 2) * theta_disc) ** 2 + epsilon ** 2)
+x_raw_disc = (0.99 + smooth_abs_disc) * np.cos(theta_disc)
+y_raw_disc = (0.99 + smooth_abs_disc) * np.sin(theta_disc)
 
 cx_raw = (np.min(x_raw_cont) + np.max(x_raw_cont)) / 2
 cy_raw = (np.min(y_raw_cont) + np.max(y_raw_cont)) / 2
@@ -69,19 +89,19 @@ x_rot0_disc, y_rot0_disc = pts_rot0_disc[0, :], pts_rot0_disc[1, :]
 
 x_min_rot, x_max_rot = np.min(x_rot0_cont), np.max(x_rot0_cont)
 y_min_rot, y_max_rot = np.min(y_rot0_cont), np.max(y_rot0_cont)
-escala = lado / max(x_max_rot - x_min_rot, y_max_rot - y_min_rot)
+scale = side / max(x_max_rot - x_min_rot, y_max_rot - y_min_rot)
 
-cx = x_start + lado / 2
-cy = y_start + lado / 2
+cx = x_start + side / 2
+cy = y_start + side / 2
 
-x_rot_cont = x_rot0_cont * escala + cx
-y_rot_cont = y_rot0_cont * escala + cy
+x_rot_cont = x_rot0_cont * scale + cx
+y_rot_cont = y_rot0_cont * scale + cy
 
-x_rot_disc = x_rot0_disc * escala + cx
-y_rot_disc = y_rot0_disc * escala + cy
+x_rot_disc = x_rot0_disc * scale + cx
+y_rot_disc = y_rot0_disc * scale + cy
 
 # ========================================================
-# 3) CINEMÁTICA INVERSA (preservada)
+# 3) INVERSE KINEMATICS (preserved)
 # ========================================================
 def calc_inv_kinematics(x_arr, y_arr):
     q1 = np.zeros(len(x_arr))
@@ -109,7 +129,7 @@ def calc_inv_kinematics(x_arr, y_arr):
 q1_disc, q2_disc = calc_inv_kinematics(x_rot_disc, y_rot_disc)
 
 # ========================================================
-# 4) VECTORES DE APROXIMACIÓN (preservados)
+# 4) APPROACH VECTORS (preserved)
 # ========================================================
 def solve_spline(x0, y0, x1, y1, x2, y2):
     A = np.array([
@@ -150,25 +170,25 @@ x_app_disc = L1 * np.cos(q1_app) + L2 * np.cos(q1_app + q2_app)
 y_app_disc = L1 * np.sin(q1_app) + L2 * np.sin(q1_app + q2_app)
 
 # ========================================================
-# 5) EXTRACCIÓN DE LOS 4 VECTORES (separados — sin hstack)
+# 5) EXTRACTION OF THE 4 VECTORS (separated — without hstack)
 # ========================================================
-# Motor 1: offset +90° (frame mecánico vs cinemático)
-# Motor 2: sin offset
-vec_m1_approach = np.degrees(q1_app   + np.pi / 2)   # articulación 1, aproximación
-vec_m2_approach = np.degrees(q2_app)                  # articulación 2, aproximación
-vec_m1_clover   = np.degrees(q1_disc  + np.pi / 2)   # articulación 1, trébol
-vec_m2_clover   = np.degrees(q2_disc)                 # articulación 2, trébol
+# Motor 1: +90° offset (mechanical vs kinematic frame)
+# Motor 2: no offset
+vec_m1_approach = np.degrees(q1_app   + np.pi / 2)   # joint 1, approach
+vec_m2_approach = np.degrees(q2_app)                  # joint 2, approach
+vec_m1_clover   = np.degrees(q1_disc  + np.pi / 2)   # joint 1, clover
+vec_m2_clover   = np.degrees(q2_disc)                 # joint 2, clover
 
-print(f"Trayectoria generada: approach={N_approach} pts, clover={N_clover} pts")
+print(f"Generated trajectory: approach={N_approach} pts, clover={N_clover} pts")
 
 # ========================================================
-# 6) CINEMÁTICA DIRECTA (para visualización)
+# 6) FORWARD KINEMATICS (for visualization)
 # ========================================================
 def forward_kinematics(th1_mech_deg, th2_mech_deg):
     """
-    Convierte ángulos mecánicos del encoder a posición cartesiana.
-    th1_mech = q1_kin + 90° → q1_kin = th1_mech - 90°
-    th2_mech = q2_kin       → sin offset
+    Converts mechanical angles from the encoder to Cartesian position.
+    th1_mech = q1_kin + 90° -> q1_kin = th1_mech - 90°
+    th2_mech = q2_kin       -> no offset
     """
     q1 = np.radians(th1_mech_deg) - np.pi / 2
     q2 = np.radians(th2_mech_deg)
@@ -177,15 +197,15 @@ def forward_kinematics(th1_mech_deg, th2_mech_deg):
     return x * 100, y * 100  # cm
 
 # ========================================================
-# 7) PROTOCOLO SERIAL
+# 7) SERIAL PROTOCOL
 # ========================================================
-# Cola compartida entre el thread lector y el hilo principal
+# Shared queue between the reader thread and the main thread
 from_esp32 = queue.Queue()
 _running   = True
 
 
 def _serial_reader(ser: serial.Serial, q: queue.Queue) -> None:
-    """Thread lector: lee líneas del puerto serial y las pone en la cola."""
+    """Reader thread: reads lines from the serial port and puts them in the queue."""
     while _running:
         try:
             raw = ser.readline()
@@ -199,9 +219,9 @@ def _serial_reader(ser: serial.Serial, q: queue.Queue) -> None:
 
 def _wait_for(q: queue.Queue, expected: str, timeout: float = 30.0) -> None:
     """
-    Bloquea hasta recibir una línea que empiece con `expected`.
-    Imprime todo lo que llegue mientras espera.
-    Lanza RuntimeError si vence el timeout.
+    Blocks until a line starting with `expected` is received.
+    Prints everything that arrives while waiting.
+    Raises RuntimeError if the timeout expires.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -209,17 +229,17 @@ def _wait_for(q: queue.Queue, expected: str, timeout: float = 30.0) -> None:
             line = q.get(timeout=0.2)
             print(f"  [ESP32] {line}")
             if line.startswith('ERROR:'):
-                raise RuntimeError(f"ESP32 reportó error: {line}")
+                raise RuntimeError(f"ESP32 reported error: {line}")
             if line.startswith(expected):
                 return
         except queue.Empty:
             pass
-    raise TimeoutError(f"Timeout esperando '{expected}'")
+    raise TimeoutError(f"Timeout waiting for '{expected}'")
 
 
 def _send_array(ser: serial.Serial, q: queue.Queue,
                 tag: str, arr: np.ndarray) -> None:
-    """Envía un array de floats con prefijo `tag:`, espera ACK `OK:<tag>`."""
+    """Sends an array of floats with prefix `tag:`, waits for ACK `OK:<tag>`."""
     csv = ','.join(f'{v:.4f}' for v in arr)
     msg = f'{tag}:{csv}\n'
     ser.write(msg.encode())
@@ -231,30 +251,30 @@ def send_trajectory(ser: serial.Serial, q: queue.Queue,
                     m1_clv: np.ndarray, m2_clv: np.ndarray,
                     n_reps: int, step_ms: int) -> None:
     """
-    Envía la trayectoria completa a la ESP32 siguiendo el protocolo:
-      TRAJ_START → arrays → TRAJ_END → espera READY
+    Sends the complete trajectory to the ESP32 following the protocol:
+      TRAJ_START -> arrays -> TRAJ_END -> wait for READY
     """
-    print("\n── Enviando trayectoria ──────────────────────")
+    print("\n── Sending trajectory ────────────────────────")
 
-    # Cabecera
+    # Header
     header = f'TRAJ_START {len(m1_app)} {len(m1_clv)} {n_reps} {step_ms}\n'
     ser.write(header.encode())
     _wait_for(q, 'OK:HEADER')
 
-    # Arrays (Python espera ACK antes de enviar el siguiente)
+    # Arrays (Python waits for ACK before sending the next one)
     for tag, arr in [('M1A', m1_app), ('M2A', m2_app),
                      ('M1C', m1_clv), ('M2C', m2_clv)]:
-        print(f"  Enviando {tag} ({len(arr)} puntos)...", end=' ')
+        print(f"  Sending {tag} ({len(arr)} points)...", end=' ')
         _send_array(ser, q, tag, arr)
         print("OK")
 
-    # Finalizar
+    # Finish
     ser.write(b'TRAJ_END\n')
     _wait_for(q, 'READY')
-    print("── ESP32 lista. Iniciando ejecución ──────────\n")
+    print("── ESP32 ready. Starting execution ───────────\n")
 
 # ========================================================
-# 8) VISUALIZACIÓN EN TIEMPO REAL
+# 8) REAL-TIME VISUALIZATION
 # ========================================================
 real_xs: list = []
 real_ys: list = []
@@ -262,27 +282,27 @@ _done = [False]
 
 
 def _build_figure():
-    """Construye la figura Matplotlib con trayectoria deseada pre-dibujada."""
+    """Builds the Matplotlib figure with the desired trajectory pre-drawn."""
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    # Trayectoria deseada (estática)
+    # Desired trajectory (static)
     ax.plot(x_app_cont * 100, y_app_cont * 100,
-            'b--', lw=1.5, alpha=0.6, label='Aproximación deseada')
+            'b--', lw=1.5, alpha=0.6, label='Desired approach')
     ax.plot(x_rot_cont * 100, y_rot_cont * 100,
-            'b-',  lw=2,   label='Trébol deseado')
+            'b-',  lw=2,   label='Desired clover')
 
-    x_cuad = [x_start, x_start+lado, x_start+lado, x_start, x_start]
-    y_cuad = [y_start, y_start, y_start+lado, y_start+lado, y_start]
-    ax.plot(np.array(x_cuad)*100, np.array(y_cuad)*100,
-            'c--', alpha=0.4, label='Área de trabajo')
+    x_quad = [x_start, x_start+side, x_start+side, x_start, x_start]
+    y_quad = [y_start, y_start, y_start+side, y_start+side, y_start]
+    ax.plot(np.array(x_quad)*100, np.array(y_quad)*100,
+            'c--', alpha=0.4, label='Workspace')
 
-    # Línea real (dinámica, actualizada por FuncAnimation)
-    real_line, = ax.plot([], [], 'r-', lw=1.5, label='Trayectoria real (encoder)')
+    # Real line (dynamic, updated by FuncAnimation)
+    real_line, = ax.plot([], [], 'r-', lw=1.5, label='Real trajectory (encoder)')
 
     ax.set_aspect('equal')
     ax.set_xlabel('X (cm)')
     ax.set_ylabel('Y (cm)')
-    ax.set_title(f'Brazo 2DOF — Trébol  |  {NUM_CLOVER_REPETITIONS} repeticiones')
+    ax.set_title(f'2DOF Arm — Clover  |  {NUM_CLOVER_REPETITIONS} repetitions')
     ax.grid(True, alpha=0.4)
     ax.legend(loc='lower left', fontsize=8)
 
@@ -290,7 +310,7 @@ def _build_figure():
 
 
 def _update(frame, real_line, ax):
-    """Función de actualización de FuncAnimation. Drena la cola y actualiza el plot."""
+    """FuncAnimation update function. Drains the queue and updates the plot."""
     while not from_esp32.empty():
         try:
             line = from_esp32.get_nowait()
@@ -311,7 +331,7 @@ def _update(frame, real_line, ax):
                     pass
         elif line == 'DONE':
             _done[0] = True
-            ax.set_title('Trayectoria completada ✓')
+            ax.set_title('Completed trajectory ✓')
 
     if real_xs:
         real_line.set_data(real_xs, real_ys)
@@ -323,8 +343,8 @@ def _update(frame, real_line, ax):
 
 def _handshake(ser: serial.Serial, q: queue.Queue, timeout: float = 15.0) -> None:
     """
-    Espera AWAITING_TRAJECTORY. Si no llega en 2s (ESP32 ya estaba corriendo),
-    envía PING para provocar la respuesta.
+    Waits for AWAITING_TRAJECTORY. If it doesn't arrive in 2s (ESP32 was already running),
+    sends PING to provoke the response.
     """
     deadline = time.time() + timeout
     ping_sent = False
@@ -336,29 +356,29 @@ def _handshake(ser: serial.Serial, q: queue.Queue, timeout: float = 15.0) -> Non
                 return
         except queue.Empty:
             if not ping_sent:
-                print("  Sin respuesta espontánea, enviando PING...")
+                print("  No spontaneous response, sending PING...")
                 ser.write(b'PING\n')
                 ping_sent = True
-    raise TimeoutError("ESP32 no respondió al handshake")
+    raise TimeoutError("ESP32 did not respond to handshake")
 
 # ========================================================
 # 9) MAIN
 # ========================================================
 if __name__ == '__main__':
-    # ── Conectar al puerto serial ──────────────────────
-    print(f"Conectando a {SERIAL_PORT} @ {BAUD_RATE} baud...")
+    # ── Connect to serial port ─────────────────────────
+    print(f"Connecting to {SERIAL_PORT} @ {BAUD_RATE} baud...")
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 
-    # ── Iniciar thread lector ──────────────────────────
+    # ── Start reader thread ────────────────────────────
     reader = threading.Thread(target=_serial_reader, args=(ser, from_esp32), daemon=True)
     reader.start()
     time.sleep(0.1)
 
-    # ── Esperar señal de arranque de la ESP32 ──────────
-    print("Esperando señal de ESP32...")
+    # ── Wait for start signal from ESP32 ───────────────
+    print("Waiting for ESP32 signal...")
     _handshake(ser, from_esp32, timeout=15.0)
 
-    # ── Enviar trayectoria ─────────────────────────────
+    # ── Send trajectory ────────────────────────────────
     send_trajectory(
         ser, from_esp32,
         vec_m1_approach, vec_m2_approach,
@@ -367,11 +387,11 @@ if __name__ == '__main__':
         step_ms=STEP_INTERVAL_MS,
     )
 
-    # ── Configurar figura ──────────────────────────────
+    # ── Configure figure ───────────────────────────────
     fig, ax, real_line = _build_figure()
 
-    # ── Animación en tiempo real ───────────────────────
-    # interval=50ms → sincronizado con telemetría a 25 Hz
+    # ── Real-time animation ────────────────────────────
+    # interval=50ms -> synchronized with telemetry at 25 Hz
     ani = animation.FuncAnimation(
         fig,
         _update,
@@ -384,7 +404,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.show()
 
-    # ── Limpieza ───────────────────────────────────────
+    # ── Cleanup ────────────────────────────────────────
     _running = False
     ser.close()
-    print("Puerto serial cerrado.")
+    print("Serial port closed.")
